@@ -1,103 +1,106 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
+const fs = require("fs/promises");
 
 const app = express();
-const port = 4000;
 app.use(express.json());
 
-const DATA_PATH = path.join(__dirname, "expenses.json");
-const SECRET_KEY = "ubralod12345";
-function readExpenses() {
-  const data = fs.readFileSync(DATA_PATH, "utf-8");
-  return JSON.parse(data);
-}
-function writeExpenses(data) {
-  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), "utf-8");
-}
-app.get("/", (req, res) => {
-  res.send("Expense API with Pagination, Secret Key & File Storage");
-});
-app.post("/expenses", (req, res) => {
-  const { title, amount } = req.body;
+app.get("/expenses", async (req, res) => {
+  const rawData = await fs.readFile("expenses.json", "utf-8");
+  const expenses = JSON.parse(rawData);
 
-  if (!title || typeof amount !== "number") {
-    return res
-      .status(400)
-      .json({ error: "Title and numeric amount are required" });
+  const page = Number(req.query.page) || 1;
+  const take = Number(req.query.take) || 30;
+
+  const startIndex = (page - 1) * take;
+  const paginatedExpenses = expenses.slice(startIndex, startIndex + take);
+
+  res.status(200).json({
+    total: expenses.length,
+    page,
+    take,
+    data: paginatedExpenses,
+  });
+});
+
+app.get("/expenses/:id", async (req, res) => {
+  const rawData = await fs.readFile("expenses.json", "utf-8");
+  const expenses = JSON.parse(rawData);
+
+  const expense = expenses.find((el) => el.id === Number(req.params.id));
+  if (!expense) {
+    return res.status(404).json({ message: "expenses not found" });
   }
 
-  const expenses = readExpenses();
+  res.status(201).json(expense);
+});
+
+app.post("/expenses", async (req, res) => {
+  const { name, amount } = req.body;
+
+  if (!name || !amount) {
+    return res.status(404).json({ error: "name and amount are required " });
+  }
+
+  const rawData = await fs.readFile("expenses.json", "utf-8");
+  const expenses = JSON.parse(rawData);
+
+  const lastId = expenses[expenses.length - 1]?.id || 0;
   const newExpense = {
-    id: Date.now(),
-    title,
+    id: lastId + 1,
+    name,
     amount,
+    createdAt: new Date().toISOString(),
   };
 
   expenses.push(newExpense);
-  writeExpenses(expenses);
-  res.status(201).json(newExpense);
+  await fs.writeFile("expenses.json", JSON.stringify(expenses));
+  res.status(201).json({ message: "expenses created", data: newExpense });
 });
-app.get("/expenses", (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const take = parseInt(req.query.take) || 30;
 
-  const expenses = readExpenses();
-  const startIndex = (page - 1) * take;
-  const endIndex = page * take;
-  const paginated = expenses.slice(startIndex, endIndex);
+app.put("/expenses/:id", async (req, res) => {
+  const rawData = await fs.readFile("expenses.json", "utf-8");
+  const expenses = JSON.parse(rawData);
 
-  res.json({
-    page,
-    take,
-    total: expenses.length,
-    data: paginated,
-  });
-});
-app.get("/expenses/:id", (req, res) => {
-  const expenses = readExpenses();
-  const expense = expenses.find((e) => e.id === parseInt(req.params.id));
-
-  if (!expense) {
-    return res.status(404).json({ error: "Expense not found" });
-  }
-
-  res.json(expense);
-});
-app.put("/expenses/:id", (req, res) => {
-  const { title, amount } = req.body;
-  const expenses = readExpenses();
-  const index = expenses.findIndex((e) => e.id === parseInt(req.params.id));
-
+  const index = expenses.findIndex((el) => el.id === Number(req.params.id));
   if (index === -1) {
-    return res.status(404).json({ error: "Expense not found" });
+    return res.status(404).json({ message: "expenses not found " });
   }
+  const updateExpenses = {
+    ...expenses[index],
+    ...req.body,
+  };
+  expenses[index] = updateExpenses;
 
-  if (title) expenses[index].title = title;
-  if (amount !== undefined) expenses[index].amount = amount;
+  await fs.writeFile("expenses.json", JSON.stringify(expenses));
 
-  writeExpenses(expenses);
-  res.json(expenses[index]);
+  res.status(200).json({ message: "Expense updated", data: updateExpenses });
 });
-app.delete("/expenses/:id", (req, res) => {
-  const secret = req.headers.secret;
-  if (secret !== SECRET_KEY) {
-    return res
-      .status(403)
-      .json({ error: "Forbidden: Invalid or missing secret key" });
+
+app.delete("/expenses/:id", async (req, res) => {
+  try {
+    const secret = req.headers.secret;
+    if (!secret) {
+      return res.status(401).json({ error: "Secret key is required" });
+    }
+    if (secret !== "random123") {
+      return res.status(401).json({ error: "Invalid secret key" });
+    }
+    const rawData = await fs.readFile("expenses.json", "utf-8");
+    let expenses = JSON.parse(rawData);
+    const index = expenses.findIndex((el) => el.id === Number(req.params.id));
+    if (index === -1) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+    const deleted = expenses.splice(index, 1);
+    await fs.writeFile("expenses.json", JSON.stringify(expenses, null, 2));
+
+    res.status(200).json({ message: "Expense deleted", data: deleted[0] });
+  } catch (error) {
+    console.error("Delete error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
-
-  const expenses = readExpenses();
-  const index = expenses.findIndex((e) => e.id === parseInt(req.params.id));
-
-  if (index === -1) {
-    return res.status(404).json({ error: "Expense not found" });
-  }
-
-  const deleted = expenses.splice(index, 1)[0];
-  writeExpenses(expenses);
-  res.json({ message: "Expense deleted", deleted });
 });
-app.listen(port, () => {
-  console.log(` Server running at http://localhost:${port}`);
+
+app.listen(4000, () => {
+  console.log("server running on http://localhost:4000");
 });
