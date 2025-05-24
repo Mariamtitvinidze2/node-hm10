@@ -10,13 +10,16 @@ const {
   validateSecretKey,
   validateCreateFields,
 } = require("./expenses.middleware");
+const { upload } = require("../../confing/cloudinary.config");
 
 const router = Router();
 
 router.get("/", getExpenses);
 router.get("/:id", getExpenseById);
-router.post("/", validateCreateFields, createExpense);
-router.put("/:id", updateExpense);
+router.post("/", upload.single("image"), validateCreateFields, createExpense);
+
+router.put("/:id", upload.single("image"), updateExpense);
+
 router.delete("/:id", validateSecretKey, deleteExpense);
 
 module.exports = router;

@@ -1,4 +1,20 @@
 const fs = require("fs/promises");
+const path = require("path");
+const multer = require("multer");
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    console.log("Multer storage destination reached");
+    cb(null, "uploads");
+  },
+  filename: (req, file, cb) => {
+    const fileName = Date.now() + path.extname(file.originalname);
+    console.log("Saving file:", fileName);
+    cb(null, fileName);
+  },
+});
+
+const upload = multer({ storage });
 
 const readExpenses = async () => {
   const data = await fs.readFile("expenses.json", "utf-8");
@@ -27,16 +43,26 @@ exports.getExpenseById = async (req, res) => {
 
 exports.createExpense = async (req, res) => {
   const { name, amount } = req.body;
+  const image = req.file?.path;
+
+  if (!name || !amount) {
+    return res.status(400).json({ error: "name and amount are required" });
+  }
+
   const expenses = await readExpenses();
   const lastId = expenses[expenses.length - 1]?.id || 0;
+
   const newExpense = {
     id: lastId + 1,
     name,
     amount,
+    image,
     createdAt: new Date().toISOString(),
   };
+
   expenses.push(newExpense);
   await writeExpenses(expenses);
+
   res.status(201).json({ message: "Expense created", data: newExpense });
 };
 
@@ -59,3 +85,5 @@ exports.deleteExpense = async (req, res) => {
   await writeExpenses(expenses);
   res.status(200).json({ message: "Expense deleted", data: deleted[0] });
 };
+
+exports.upload = upload;
